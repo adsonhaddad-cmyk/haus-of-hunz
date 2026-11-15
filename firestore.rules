@@ -1,0 +1,868 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default-Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global Hardened Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidInviteCode(code) {
+      return code is string && code.size() >= 4 && code.size() <= 32 && code.matches('^[A-Z0-9\\-]+$');
+    }
+
+    function isValidOptionalId(id) {
+      return id is string && id.size() <= 128 && (id.size() == 0 || id.matches('^[a-zA-Z0-9_\\-]+$'));
+    }
+
+    function isValidOccurrenceId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 160;
+    }
+
+    function isValidMemberUids(uids) {
+      return uids is list
+        && uids.size() >= 1
+        && uids.size() <= 10
+        && uids[0] is string
+        && isValidId(uids[0]);
+    }
+
+    // Master Gate Membership Helpers (never used inside allow list)
+    function isHouseholdMember(householdId) {
+      return isEmailVerified()
+        && exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid));
+    }
+
+    function isHouseholdMemberAfter(householdId) {
+      return isEmailVerified()
+        && existsAfter(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid));
+    }
+
+    function isHouseholdOwner(householdId) {
+      return isHouseholdMember(householdId)
+        && get(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid)).data.role == 'owner';
+    }
+
+    // Guarantees only a UID with an active /members/{uid} doc in this household can be appended to memberUids
+    function isVerifiedMemberUidAppend(householdId) {
+      return isHouseholdMember(householdId)
+        && isValidMemberUids(incoming().memberUids)
+        && existing().memberUids is list
+        && incoming().memberUids.size() == existing().memberUids.size() + 1
+        && incoming().memberUids.hasAll(existing().memberUids)
+        && isValidId(incoming().memberUids[incoming().memberUids.size() - 1])
+        && !(incoming().memberUids[incoming().memberUids.size() - 1] in existing().memberUids)
+        && exists(/databases/$(database)/documents/households/$(householdId)/members/$(incoming().memberUids[incoming().memberUids.size() - 1]));
+    }
+
+    // 3. Entity Validation Blueprints (Anti-Update-Gap)
+
+    function isValidUserPublic(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'householdId', 'residentId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'householdId', 'residentId', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 40
+        && isValidId(data.householdId)
+        && isValidId(data.residentId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivateProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidHouseholdInvite(data) {
+      return data.keys().hasAll(['code', 'householdId', 'createdByUid', 'createdAt'])
+        && data.keys().hasOnly(['code', 'householdId', 'createdByUid', 'createdAt'])
+        && isValidInviteCode(data.code)
+        && isValidId(data.householdId)
+        && isValidId(data.createdByUid)
+        && data.createdByUid == request.auth.uid
+        && data.createdAt is timestamp;
+    }
+
+    function isValidHousePreferences(prefs) {
+      return prefs is map
+        && prefs.keys().hasAll(['weeklyPointsGoal', 'reducedMotionOverride'])
+        && prefs.keys().hasOnly(['weeklyPointsGoal', 'reducedMotionOverride'])
+        && prefs.weeklyPointsGoal is number && prefs.weeklyPointsGoal >= 20 && prefs.weeklyPointsGoal <= 1000
+        && prefs.reducedMotionOverride is bool;
+    }
+
+    function isValidPenaltySettings(ps) {
+      return ps is map
+        && ps.keys().hasAll(['enabled', 'gracePeriodMinutes', 'tiers', 'reminderFrequencyHours', 'maxPokesPerOccurrence'])
+        && ps.keys().hasOnly(['enabled', 'gracePeriodMinutes', 'tiers', 'reminderFrequencyHours', 'maxPokesPerOccurrence'])
+        && ps.enabled is bool
+        && ps.gracePeriodMinutes is number && ps.gracePeriodMinutes >= 0 && ps.gracePeriodMinutes <= 720
+        && ps.tiers is list && ps.tiers.size() >= 1 && ps.tiers.size() <= 10 && ps.tiers[0] is map
+        && ps.reminderFrequencyHours is number && ps.reminderFrequencyHours >= 1 && ps.reminderFrequencyHours <= 72
+        && ps.maxPokesPerOccurrence is number && ps.maxPokesPerOccurrence >= 1 && ps.maxPokesPerOccurrence <= 5;
+    }
+
+    function isValidHousehold(data) {
+      return data.keys().hasAll([
+          'id', 'houseName', 'tagline', 'houseStyle', 'timeZone',
+          'ownerUid', 'inviteCode', 'preferences', 'penaltySettings',
+          'memberUids', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'houseName', 'tagline', 'houseStyle', 'timeZone',
+          'ownerUid', 'inviteCode', 'preferences', 'penaltySettings',
+          'memberUids', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.houseName is string && data.houseName.size() >= 1 && data.houseName.size() <= 60
+        && data.tagline is string && data.tagline.size() >= 1 && data.tagline.size() <= 100
+        && data.houseStyle in ['loft', 'apartment', 'garden']
+        && data.timeZone is string && data.timeZone.size() >= 1 && data.timeZone.size() <= 64
+        && isValidId(data.ownerUid)
+        && isValidInviteCode(data.inviteCode)
+        && isValidHousePreferences(data.preferences)
+        && isValidPenaltySettings(data.penaltySettings)
+        && isValidMemberUids(data.memberUids)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidHouseholdMember(data) {
+      return data.keys().hasAll(['uid', 'householdId', 'residentId', 'role', 'memberUids', 'joinedAt'])
+        && data.keys().hasOnly(['uid', 'householdId', 'residentId', 'role', 'inviteCode', 'memberUids', 'joinedAt'])
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && isValidId(data.householdId)
+        && isValidId(data.residentId)
+        && data.role in ['owner', 'partner']
+        && (!('inviteCode' in data) || isValidInviteCode(data.inviteCode))
+        && isValidMemberUids(data.memberUids)
+        && data.joinedAt is timestamp;
+    }
+
+    function isValidAvatarConfig(cfg) {
+      return cfg is map
+        && cfg.keys().hasAll(['skinTone', 'hairStyle', 'facialHair', 'clothing', 'accessory', 'expression', 'accentColor'])
+        && cfg.keys().hasOnly(['skinTone', 'hairStyle', 'facialHair', 'clothing', 'accessory', 'expression', 'accentColor', 'customPhotoUrl'])
+        && cfg.skinTone in ['porcelain', 'peach', 'honey', 'amber', 'chestnut', 'espresso']
+        && cfg.hairStyle in ['short_fade', 'curly_crown', 'sleek_bob', 'waves', 'buzz', 'updo']
+        && cfg.facialHair in ['none', 'stubble', 'mustache', 'beard']
+        && cfg.clothing in ['lavender_sweater', 'silk_blazer', 'sequin_top', 'hoodie', 'mesh_chic']
+        && cfg.accessory in ['none', 'cat_eye_shades', 'pearls', 'crown', 'hoops', 'headband']
+        && cfg.expression in ['smile', 'smirk', 'wink', 'gasp', 'serene']
+        && cfg.accentColor is string && cfg.accentColor.size() >= 4 && cfg.accentColor.size() <= 20
+        && (!('customPhotoUrl' in cfg) || (cfg.customPhotoUrl is string && cfg.customPhotoUrl.size() <= 150000));
+    }
+
+    function isValidResidentProfile(data) {
+      return data.keys().hasAll([
+          'id', 'uid', 'name', 'handle', 'role', 'color', 'points', 'streak',
+          'shadeIntensity', 'muteShadeNotifications', 'pushEnabled', 'avatarConfig',
+          'memberUids', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'uid', 'name', 'handle', 'role', 'color', 'points', 'streak',
+          'shadeIntensity', 'muteShadeNotifications', 'pushEnabled', 'avatarConfig',
+          'memberUids', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidOptionalId(data.uid)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 40
+        && data.handle is string && data.handle.size() >= 1 && data.handle.size() <= 40
+        && data.role in ['icon', 'partner']
+        && data.color is string && data.color.size() >= 4 && data.color.size() <= 20
+        && data.points is number && data.points >= 0 && data.points <= 1000000
+        && data.streak is number && data.streak >= 0 && data.streak <= 10000
+        && data.shadeIntensity in ['soft_serve', 'a_little_shady', 'full_ballroom']
+        && data.muteShadeNotifications is bool
+        && data.pushEnabled is bool
+        && isValidAvatarConfig(data.avatarConfig)
+        && isValidMemberUids(data.memberUids)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidHouseholdTask(data) {
+      return data.keys().hasAll([
+          'id', 'title', 'category', 'points', 'priority', 'frequency',
+          'assignedToId', 'participantIds', 'dueDate', 'dueTime', 'dueAt',
+          'occurrenceId', 'occurrenceSeq', 'status', 'history',
+          'createdByUid', 'memberUids', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'title', 'description', 'category', 'points', 'priority', 'frequency',
+          'customIntervalDays', 'assignedToId', 'participantIds', 'dueDate', 'dueTime', 'dueAt',
+          'occurrenceId', 'occurrenceSeq', 'status', 'pausedUntil', 'pausedReason',
+          'reassignedAt', 'reassignedBeforeDeadline', 'lastCompletedOccurrenceKey',
+          'history', 'createdByUid', 'memberUids', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && (!('description' in data) || (data.description is string && data.description.size() <= 280))
+        && data.category in ['Limpeza', 'Cozinha', 'Organização', 'Manutenção', 'Geral']
+        && data.points is number && data.points >= 5 && data.points <= 200
+        && data.priority in ['alta', 'media', 'normal']
+        && data.frequency in ['once', 'daily', 'weekly', 'biweekly', 'monthly', 'custom']
+        && (!('customIntervalDays' in data) || (data.customIntervalDays is number && data.customIntervalDays >= 1 && data.customIntervalDays <= 90))
+        && isValidId(data.assignedToId)
+        && data.participantIds is list && data.participantIds.size() >= 1 && data.participantIds.size() <= 10 && data.participantIds[0] is string
+        && data.dueDate is string && data.dueDate.size() == 10 && data.dueDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.dueTime is string && data.dueTime.size() == 5 && data.dueTime.matches('^[0-9]{2}:[0-9]{2}$')
+        && data.dueAt is string && data.dueAt.size() >= 1 && data.dueAt.size() <= 40
+        && isValidOccurrenceId(data.occurrenceId)
+        && data.occurrenceSeq is number && data.occurrenceSeq >= 1 && data.occurrenceSeq <= 100000
+        && data.status in ['pending', 'completed', 'paused']
+        && (!('pausedUntil' in data) || (data.pausedUntil is string && data.pausedUntil.size() <= 40))
+        && (!('pausedReason' in data) || (data.pausedReason is string && data.pausedReason.size() <= 120))
+        && (!('reassignedAt' in data) || (data.reassignedAt is string && data.reassignedAt.size() <= 40))
+        && (!('reassignedBeforeDeadline' in data) || (data.reassignedBeforeDeadline is bool))
+        && (!('lastCompletedOccurrenceKey' in data) || (data.lastCompletedOccurrenceKey is string && data.lastCompletedOccurrenceKey.size() <= 160))
+        && data.history is list && data.history.size() <= 50 && (data.history.size() == 0 || data.history[0] is map)
+        && isValidId(data.createdByUid)
+        && isValidMemberUids(data.memberUids)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidShoppingItem(data) {
+      return data.keys().hasAll([
+          'id', 'name', 'quantity', 'unit', 'category',
+          'authorId', 'authorUid', 'status', 'memberUids', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'name', 'quantity', 'unit', 'category',
+          'authorId', 'authorUid', 'status', 'buyerId', 'boughtAt',
+          'memberUids', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.quantity is number && data.quantity > 0 && data.quantity <= 10000
+        && data.unit in ['un', 'kg', 'g', 'L', 'ml', 'pct', 'cx']
+        && data.category in ['Mercado', 'Limpeza', 'Padaria', 'Hortifruti', 'Casa']
+        && isValidId(data.authorId)
+        && isValidId(data.authorUid)
+        && data.status in ['pending', 'bought']
+        && (!('buyerId' in data) || isValidOptionalId(data.buyerId))
+        && (!('boughtAt' in data) || (data.boughtAt is string && data.boughtAt.size() <= 40))
+        && isValidMemberUids(data.memberUids)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPinNote(data) {
+      return data.keys().hasAll(['id', 'authorId', 'authorUid', 'content', 'pinned', 'memberUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'authorId', 'authorUid', 'content', 'pinned', 'memberUids', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.authorId)
+        && isValidId(data.authorUid)
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 220
+        && data.pinned is bool
+        && isValidMemberUids(data.memberUids)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPointTransaction(data) {
+      return data.keys().hasAll([
+          'id', 'residentId', 'taskId', 'taskTitle', 'occurrenceId', 'type',
+          'basePoints', 'penaltyPercent', 'pointsDelta', 'penaltyDeducted',
+          'wasOverdue', 'delayMinutes', 'weekKey', 'actorUid', 'memberUids', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'residentId', 'taskId', 'taskTitle', 'occurrenceId', 'type',
+          'basePoints', 'penaltyPercent', 'pointsDelta', 'penaltyDeducted',
+          'wasOverdue', 'delayMinutes', 'weekKey', 'actorUid', 'memberUids', 'createdAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.residentId)
+        && isValidId(data.taskId)
+        && data.taskTitle is string && data.taskTitle.size() >= 1 && data.taskTitle.size() <= 120
+        && isValidOccurrenceId(data.occurrenceId)
+        && data.type in ['completion', 'penalty', 'bonus']
+        && data.basePoints is number && data.basePoints >= 0 && data.basePoints <= 500
+        && data.penaltyPercent is number && data.penaltyPercent >= 0 && data.penaltyPercent <= 100
+        && data.pointsDelta is number && data.pointsDelta >= -500 && data.pointsDelta <= 500
+        && data.penaltyDeducted is number && data.penaltyDeducted >= 0 && data.penaltyDeducted <= 500
+        && data.wasOverdue is bool
+        && data.delayMinutes is number && data.delayMinutes >= 0 && data.delayMinutes <= 1000000
+        && data.weekKey is string && data.weekKey.size() >= 4 && data.weekKey.size() <= 16
+        && isValidId(data.actorUid)
+        && isValidMemberUids(data.memberUids)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidPokeRecord(data) {
+      return data.keys().hasAll([
+          'id', 'taskId', 'taskTitle', 'occurrenceId', 'fromResidentId', 'fromUid',
+          'toResidentId', 'intensity', 'message', 'deliveredViaPush', 'memberUids', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'taskId', 'taskTitle', 'occurrenceId', 'fromResidentId', 'fromUid',
+          'toResidentId', 'intensity', 'message', 'deliveredViaPush', 'memberUids', 'createdAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.taskId)
+        && data.taskTitle is string && data.taskTitle.size() >= 1 && data.taskTitle.size() <= 120
+        && isValidOccurrenceId(data.occurrenceId)
+        && isValidId(data.fromResidentId)
+        && isValidId(data.fromUid)
+        && isValidId(data.toResidentId)
+        && data.fromResidentId != data.toResidentId
+        && data.intensity in ['soft_serve', 'a_little_shady', 'full_ballroom']
+        && data.message is string && data.message.size() >= 1 && data.message.size() <= 280
+        && data.deliveredViaPush is bool
+        && isValidMemberUids(data.memberUids)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSwapRequest(data) {
+      return data.keys().hasAll([
+          'id', 'taskId', 'taskTitle', 'fromResidentId', 'fromUid',
+          'toResidentId', 'status', 'memberUids', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'taskId', 'taskTitle', 'fromResidentId', 'fromUid',
+          'toResidentId', 'note', 'status', 'respondedAt', 'memberUids', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.taskId)
+        && data.taskTitle is string && data.taskTitle.size() >= 1 && data.taskTitle.size() <= 120
+        && isValidId(data.fromResidentId)
+        && isValidId(data.fromUid)
+        && isValidId(data.toResidentId)
+        && data.fromResidentId != data.toResidentId
+        && (!('note' in data) || (data.note is string && data.note.size() <= 120))
+        && data.status in ['pending', 'accepted', 'declined', 'cancelled']
+        && (!('respondedAt' in data) || (data.respondedAt is string && data.respondedAt.size() <= 40))
+        && isValidMemberUids(data.memberUids)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidInAppNotification(data) {
+      return data.keys().hasAll([
+          'id', 'recipientId', 'actorUid', 'type', 'title', 'body',
+          'memberUids', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'recipientId', 'senderId', 'actorUid', 'type', 'title', 'body',
+          'taskId', 'intensity', 'readAt', 'memberUids', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.recipientId)
+        && (!('senderId' in data) || isValidOptionalId(data.senderId))
+        && isValidId(data.actorUid)
+        && data.type in ['poke', 'swap', 'penalty', 'achievement', 'system']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.body is string && data.body.size() >= 1 && data.body.size() <= 280
+        && (!('taskId' in data) || isValidOptionalId(data.taskId))
+        && (!('intensity' in data) || data.intensity in ['soft_serve', 'a_little_shady', 'full_ballroom'])
+        && (!('readAt' in data) || (data.readAt is string && data.readAt.size() <= 40))
+        && isValidMemberUids(data.memberUids)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidHouseActivityLog(data) {
+      return data.keys().hasAll(['id', 'type', 'actorId', 'actorUid', 'summary', 'memberUids', 'createdAt'])
+        && data.keys().hasOnly(['id', 'type', 'actorId', 'actorUid', 'summary', 'memberUids', 'createdAt'])
+        && isValidId(data.id)
+        && data.type in ['task', 'shopping', 'poke', 'swap', 'penalty', 'house']
+        && isValidId(data.actorId)
+        && isValidId(data.actorUid)
+        && data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 200
+        && isValidMemberUids(data.memberUids)
+        && data.createdAt is timestamp;
+    }
+
+    // 4. Collection Rules (All Blueprint Paths Explicitly Secured)
+
+    match /users/{userId} {
+      allow get: if isEmailVerified() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+      allow create: if isEmailVerified()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserPublic(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          exists(/databases/$(database)/documents/households/$(incoming().householdId)/members/$(request.auth.uid))
+          || existsAfter(/databases/$(database)/documents/households/$(incoming().householdId)/members/$(request.auth.uid))
+        );
+      allow update: if isEmailVerified()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserPublic(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'householdId', 'residentId', 'updatedAt']);
+      allow delete: if false;
+
+      match /private/{docId} {
+        allow get: if isEmailVerified() && isValidId(userId) && isValidId(docId) && request.auth.uid == userId;
+        allow list: if false;
+        allow create: if isEmailVerified()
+          && isValidId(userId)
+          && isValidId(docId)
+          && request.auth.uid == userId
+          && isValidUserPrivateProfile(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isEmailVerified()
+          && isValidId(userId)
+          && isValidId(docId)
+          && request.auth.uid == userId
+          && isValidUserPrivateProfile(incoming())
+          && incoming().uid == existing().uid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']);
+        allow delete: if false;
+      }
+    }
+
+    match /invites/{inviteCode} {
+      allow get: if isEmailVerified() && isValidInviteCode(inviteCode);
+      allow list: if false;
+      allow create: if isEmailVerified()
+        && isValidInviteCode(inviteCode)
+        && isValidHouseholdInvite(incoming())
+        && incoming().code == inviteCode
+        && incoming().createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/households/$(incoming().householdId));
+      allow update, delete: if false;
+    }
+
+    match /households/{householdId} {
+      allow get: if isValidId(householdId) && isHouseholdMember(householdId);
+      allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+      allow create: if isEmailVerified()
+        && isValidId(householdId)
+        && isValidHousehold(incoming())
+        && incoming().id == householdId
+        && incoming().ownerUid == request.auth.uid
+        && (request.auth.uid in incoming().memberUids)
+        && incoming().memberUids.size() == 1
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isHouseholdMemberAfter(householdId);
+      allow update: if isEmailVerified()
+        && isValidId(householdId)
+        && isValidHousehold(incoming())
+        && incoming().id == existing().id
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().inviteCode == existing().inviteCode
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isHouseholdMember(householdId)
+            && incoming().memberUids == existing().memberUids
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'houseName', 'tagline', 'houseStyle', 'timeZone', 'preferences', 'penaltySettings', 'updatedAt'
+            ]))
+          || (isVerifiedMemberUidAppend(householdId)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']))
+        );
+      allow delete: if false;
+
+      match /members/{memberUid} {
+        allow get: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(memberUid)
+          && (request.auth.uid == memberUid || isHouseholdMember(householdId));
+        allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+        allow create: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(memberUid)
+          && request.auth.uid == memberUid
+          && isValidHouseholdMember(incoming())
+          && incoming().householdId == householdId
+          && incoming().joinedAt == request.time
+          && (request.auth.uid in incoming().memberUids)
+          && (
+            (!exists(/databases/$(database)/documents/households/$(householdId))
+              && existsAfter(/databases/$(database)/documents/households/$(householdId))
+              && incoming().role == 'owner'
+              && incoming().memberUids.size() == 1)
+            || (exists(/databases/$(database)/documents/households/$(householdId))
+              && incoming().role == 'partner'
+              && ('inviteCode' in incoming())
+              && exists(/databases/$(database)/documents/invites/$(incoming().inviteCode))
+              && get(/databases/$(database)/documents/invites/$(incoming().inviteCode)).data.householdId == householdId)
+          );
+        allow update: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(memberUid)
+          && isValidHouseholdMember(incoming())
+          && incoming().uid == existing().uid
+          && incoming().householdId == existing().householdId
+          && incoming().residentId == existing().residentId
+          && incoming().role == existing().role
+          && incoming().joinedAt == existing().joinedAt
+          && isVerifiedMemberUidAppend(householdId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']);
+        allow delete: if isValidId(householdId) && isValidId(memberUid) && isHouseholdOwner(householdId);
+      }
+
+      match /residents/{residentId} {
+        allow get: if isValidId(householdId) && isValidId(residentId) && isHouseholdMember(householdId);
+        allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+        allow create: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(residentId)
+          && isValidResidentProfile(incoming())
+          && incoming().id == residentId
+          && incoming().updatedAt == request.time
+          && (request.auth.uid in incoming().memberUids)
+          && (
+            (!exists(/databases/$(database)/documents/households/$(householdId))
+              && isHouseholdMemberAfter(householdId)
+              && (incoming().uid == request.auth.uid || incoming().uid == ''))
+            || (isHouseholdMember(householdId) && incoming().uid == request.auth.uid)
+          );
+        allow update: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(residentId)
+          && isValidResidentProfile(incoming())
+          && incoming().id == existing().id
+          && incoming().handle == existing().handle
+          && incoming().role == existing().role
+          && incoming().updatedAt == request.time
+          && (
+            // Action: Self avatar, push & shade preferences update
+            (isHouseholdMember(householdId)
+              && existing().uid == request.auth.uid
+              && incoming().uid == existing().uid
+              && incoming().memberUids == existing().memberUids
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'name', 'color', 'shadeIntensity', 'muteShadeNotifications', 'avatarConfig', 'pushEnabled', 'updatedAt'
+              ]))
+            // Action: Self points & streak update on chore completion (bounded increment)
+            || (isHouseholdMember(householdId)
+              && existing().uid == request.auth.uid
+              && incoming().uid == existing().uid
+              && incoming().memberUids == existing().memberUids
+              && (incoming().points - existing().points) <= 200
+              && incoming().diff(existing()).affectedKeys().hasOnly(['points', 'streak', 'updatedAt']))
+            // Action: Household owner Reset Demo Data
+            || (isHouseholdOwner(householdId)
+              && incoming().uid == existing().uid
+              && incoming().memberUids == existing().memberUids
+              && incoming().diff(existing()).affectedKeys().hasOnly(['points', 'streak', 'updatedAt']))
+            // Action: Partner claims unclaimed resident slot after verifying invite membership
+            || (isHouseholdMember(householdId)
+              && existing().uid == ''
+              && incoming().uid == request.auth.uid
+              && (
+                (isVerifiedMemberUidAppend(householdId)
+                  && incoming().diff(existing()).affectedKeys().hasOnly(['uid', 'memberUids', 'updatedAt']))
+                || (incoming().memberUids == existing().memberUids
+                  && incoming().diff(existing()).affectedKeys().hasOnly(['uid', 'updatedAt']))
+              ))
+            // Action: Verified household member syncs new member UID onto resident doc
+            || (isVerifiedMemberUidAppend(householdId)
+              && incoming().uid == existing().uid
+              && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']))
+          );
+        allow delete: if false;
+      }
+
+      match /tasks/{taskId} {
+        allow get: if isValidId(householdId) && isValidId(taskId) && isHouseholdMember(householdId);
+        allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+        allow create: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(taskId)
+          && isValidHouseholdTask(incoming())
+          && incoming().id == taskId
+          && incoming().createdByUid == request.auth.uid
+          && (request.auth.uid in incoming().memberUids)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && (isHouseholdMember(householdId) || isHouseholdMemberAfter(householdId));
+        allow update: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(taskId)
+          && isValidHouseholdTask(incoming())
+          && incoming().id == existing().id
+          && incoming().createdByUid == existing().createdByUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action: Edit chore details or reassign turn
+            (isHouseholdMember(householdId)
+              && incoming().memberUids == existing().memberUids
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'title', 'description', 'category', 'points', 'priority', 'frequency',
+                'customIntervalDays', 'assignedToId', 'participantIds', 'dueDate',
+                'dueTime', 'dueAt', 'reassignedAt', 'reassignedBeforeDeadline', 'updatedAt'
+              ]))
+            // Action: Pause or Resume chore rotation
+            || (isHouseholdMember(householdId)
+              && incoming().memberUids == existing().memberUids
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'status', 'pausedUntil', 'pausedReason', 'updatedAt'
+              ]))
+            // Action: Complete chore & advance rotation occurrence
+            || (isHouseholdMember(householdId)
+              && incoming().memberUids == existing().memberUids
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'assignedToId', 'dueDate', 'dueAt', 'occurrenceId', 'occurrenceSeq',
+                'status', 'reassignedAt', 'reassignedBeforeDeadline',
+                'lastCompletedOccurrenceKey', 'history', 'updatedAt'
+              ]))
+            // Action: Verified household member syncs new member UID
+            || (isVerifiedMemberUidAppend(householdId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']))
+          );
+        allow delete: if isValidId(householdId) && isValidId(taskId) && isHouseholdMember(householdId);
+      }
+
+      match /shoppingItems/{itemId} {
+        allow get: if isValidId(householdId) && isValidId(itemId) && isHouseholdMember(householdId);
+        allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+        allow create: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(itemId)
+          && isValidShoppingItem(incoming())
+          && incoming().id == itemId
+          && incoming().authorUid == request.auth.uid
+          && (request.auth.uid in incoming().memberUids)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && (isHouseholdMember(householdId) || isHouseholdMemberAfter(householdId));
+        allow update: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(itemId)
+          && isValidShoppingItem(incoming())
+          && incoming().id == existing().id
+          && incoming().authorId == existing().authorId
+          && incoming().authorUid == existing().authorUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action: Edit shopping item fields
+            (isHouseholdMember(householdId)
+              && incoming().memberUids == existing().memberUids
+              && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'quantity', 'unit', 'category', 'updatedAt']))
+            // Action: Mark bought or restore to pending
+            || (isHouseholdMember(householdId)
+              && incoming().memberUids == existing().memberUids
+              && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'buyerId', 'boughtAt', 'updatedAt']))
+            // Action: Verified household member syncs new member UID
+            || (isVerifiedMemberUidAppend(householdId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']))
+          );
+        allow delete: if isValidId(householdId) && isValidId(itemId) && isHouseholdMember(householdId);
+      }
+
+      match /pinNotes/{noteId} {
+        allow get: if isValidId(householdId) && isValidId(noteId) && isHouseholdMember(householdId);
+        allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+        allow create: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(noteId)
+          && isValidPinNote(incoming())
+          && incoming().id == noteId
+          && incoming().authorUid == request.auth.uid
+          && (request.auth.uid in incoming().memberUids)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && (isHouseholdMember(householdId) || isHouseholdMemberAfter(householdId));
+        allow update: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(noteId)
+          && isValidPinNote(incoming())
+          && incoming().id == existing().id
+          && incoming().authorId == existing().authorId
+          && incoming().authorUid == existing().authorUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action: Edit note content
+            (isHouseholdMember(householdId)
+              && incoming().memberUids == existing().memberUids
+              && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'updatedAt']))
+            // Action: Toggle pin status
+            || (isHouseholdMember(householdId)
+              && incoming().memberUids == existing().memberUids
+              && incoming().diff(existing()).affectedKeys().hasOnly(['pinned', 'updatedAt']))
+            // Action: Verified household member syncs new member UID
+            || (isVerifiedMemberUidAppend(householdId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']))
+          );
+        allow delete: if isValidId(householdId) && isValidId(noteId) && isHouseholdMember(householdId);
+      }
+
+      match /pointLedger/{txId} {
+        allow get: if isValidId(householdId) && isValidId(txId) && isHouseholdMember(householdId);
+        allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+        allow create: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(txId)
+          && isValidPointTransaction(incoming())
+          && incoming().id == txId
+          && incoming().actorUid == request.auth.uid
+          && (request.auth.uid in incoming().memberUids)
+          && incoming().createdAt == request.time
+          && (isHouseholdMember(householdId) || isHouseholdMemberAfter(householdId));
+        // Immutable audit ledger: only verified memberUids append allowed during partner join sync
+        allow update: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(txId)
+          && isValidPointTransaction(incoming())
+          && isVerifiedMemberUidAppend(householdId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']);
+        allow delete: if isValidId(householdId) && isValidId(txId) && isHouseholdOwner(householdId);
+      }
+
+      match /pokes/{pokeId} {
+        allow get: if isValidId(householdId) && isValidId(pokeId) && isHouseholdMember(householdId);
+        allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+        allow create: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(pokeId)
+          && isValidPokeRecord(incoming())
+          && incoming().id == pokeId
+          && incoming().fromUid == request.auth.uid
+          && (request.auth.uid in incoming().memberUids)
+          && incoming().createdAt == request.time
+          && isHouseholdMember(householdId);
+        // Immutable poke log; only verified memberUids append allowed
+        allow update: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(pokeId)
+          && isValidPokeRecord(incoming())
+          && isVerifiedMemberUidAppend(householdId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']);
+        allow delete: if isValidId(householdId) && isValidId(pokeId) && isHouseholdOwner(householdId);
+      }
+
+      match /swapRequests/{swapId} {
+        allow get: if isValidId(householdId) && isValidId(swapId) && isHouseholdMember(householdId);
+        allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+        allow create: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(swapId)
+          && isValidSwapRequest(incoming())
+          && incoming().id == swapId
+          && incoming().fromUid == request.auth.uid
+          && incoming().status == 'pending'
+          && (request.auth.uid in incoming().memberUids)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && isHouseholdMember(householdId);
+        allow update: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(swapId)
+          && isValidSwapRequest(incoming())
+          && incoming().id == existing().id
+          && incoming().taskId == existing().taskId
+          && incoming().fromResidentId == existing().fromResidentId
+          && incoming().fromUid == existing().fromUid
+          && incoming().toResidentId == existing().toResidentId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Terminal State Locking: only pending swaps can transition to accepted/declined/cancelled
+            (isHouseholdMember(householdId)
+              && existing().status == 'pending'
+              && incoming().memberUids == existing().memberUids
+              && (
+                (incoming().status == 'cancelled' && existing().fromUid == request.auth.uid)
+                || (incoming().status in ['accepted', 'declined'] && existing().fromUid != request.auth.uid)
+              )
+              && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'respondedAt', 'updatedAt']))
+            // Action: Verified household member syncs new member UID
+            || (isVerifiedMemberUidAppend(householdId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']))
+          );
+        allow delete: if isValidId(householdId) && isValidId(swapId) && isHouseholdOwner(householdId);
+      }
+
+      match /notifications/{notifId} {
+        allow get: if isValidId(householdId) && isValidId(notifId) && isHouseholdMember(householdId);
+        allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+        allow create: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(notifId)
+          && isValidInAppNotification(incoming())
+          && incoming().id == notifId
+          && incoming().actorUid == request.auth.uid
+          && (request.auth.uid in incoming().memberUids)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && isHouseholdMember(householdId);
+        allow update: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(notifId)
+          && isValidInAppNotification(incoming())
+          && incoming().id == existing().id
+          && incoming().recipientId == existing().recipientId
+          && incoming().actorUid == existing().actorUid
+          && incoming().type == existing().type
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action: Mark notification as read
+            (isHouseholdMember(householdId)
+              && incoming().memberUids == existing().memberUids
+              && incoming().diff(existing()).affectedKeys().hasOnly(['readAt', 'updatedAt']))
+            // Action: Verified household member syncs new member UID
+            || (isVerifiedMemberUidAppend(householdId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']))
+          );
+        allow delete: if isValidId(householdId) && isValidId(notifId) && isHouseholdMember(householdId);
+      }
+
+      match /activityLog/{logId} {
+        allow get: if isValidId(householdId) && isValidId(logId) && isHouseholdMember(householdId);
+        allow list: if isEmailVerified() && (request.auth.uid in resource.data.memberUids);
+        allow create: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(logId)
+          && isValidHouseActivityLog(incoming())
+          && incoming().id == logId
+          && incoming().actorUid == request.auth.uid
+          && (request.auth.uid in incoming().memberUids)
+          && incoming().createdAt == request.time
+          && (isHouseholdMember(householdId) || isHouseholdMemberAfter(householdId));
+        // Immutable activity log; only verified memberUids append allowed
+        allow update: if isEmailVerified()
+          && isValidId(householdId)
+          && isValidId(logId)
+          && isValidHouseActivityLog(incoming())
+          && isVerifiedMemberUidAppend(householdId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']);
+        allow delete: if isValidId(householdId) && isValidId(logId) && isHouseholdOwner(householdId);
+      }
+    }
+  }
+}

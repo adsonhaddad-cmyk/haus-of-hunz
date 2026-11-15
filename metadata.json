@@ -1,0 +1,8 @@
+{
+  "name": "HAUS OF HUNZ",
+  "description": "HAUS OF HUNZ: A shared home management app for hunks only. Keep your chores in check, grocery lists organized, house notes flowing, and your fellow hunks accountable; with a little friendly competition and just the right amount of shade.\n\nBecause a fabulous haus doesn't run itself, darling.\n\nWe all wanna live in harmony, don't we? 💅",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

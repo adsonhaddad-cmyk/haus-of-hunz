@@ -1,0 +1,953 @@
+{
+  "entities": {
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "Non-PII public user reference linking a Firebase Auth UID to a household and resident profile.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "householdId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "residentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "householdId", "residentId", "createdAt", "updatedAt"]
+    },
+    "UserPrivateProfile": {
+      "title": "UserPrivateProfile",
+      "description": "Isolated PII document containing the signed-in user email address, readable only by the owner.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "HouseholdInvite": {
+      "title": "HouseholdInvite",
+      "description": "Invite code lookup linking a short join code to a householdId.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9\\-]+$"
+        },
+        "householdId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["code", "householdId", "createdByUid", "createdAt"]
+    },
+    "Household": {
+      "title": "Household",
+      "description": "Shared household settings, tagline, timezone, weekly goal, and penalty rules.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "houseName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "tagline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "houseStyle": {
+          "type": "string",
+          "enum": ["loft", "apartment", "garden"]
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "inviteCode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9\\-]+$"
+        },
+        "preferences": {
+          "type": "object"
+        },
+        "penaltySettings": {
+          "type": "object"
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Bounded list of Firebase Auth UIDs belonging to this household (max 10)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "houseName",
+        "tagline",
+        "houseStyle",
+        "timeZone",
+        "ownerUid",
+        "inviteCode",
+        "preferences",
+        "penaltySettings",
+        "memberUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "HouseholdMember": {
+      "title": "HouseholdMember",
+      "description": "Membership gate mapping a Firebase Auth UID to a household role and residentId.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "householdId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "residentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["owner", "partner"]
+        },
+        "inviteCode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9\\-]+$"
+        },
+        "memberUids": {
+          "type": "array"
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "householdId", "residentId", "role", "memberUids", "joinedAt"]
+    },
+    "ResidentProfile": {
+      "title": "ResidentProfile",
+      "description": "Partner game profile, Avatar Studio config, points, streak, and shade preferences.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "uid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "role": {
+          "type": "string",
+          "enum": ["icon", "partner"]
+        },
+        "color": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 20
+        },
+        "points": {
+          "type": "number"
+        },
+        "streak": {
+          "type": "number"
+        },
+        "shadeIntensity": {
+          "type": "string",
+          "enum": ["soft_serve", "a_little_shady", "full_ballroom"]
+        },
+        "muteShadeNotifications": {
+          "type": "boolean"
+        },
+        "pushEnabled": {
+          "type": "boolean"
+        },
+        "avatarConfig": {
+          "type": "object"
+        },
+        "memberUids": {
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "uid",
+        "name",
+        "handle",
+        "role",
+        "color",
+        "points",
+        "streak",
+        "shadeIntensity",
+        "muteShadeNotifications",
+        "pushEnabled",
+        "avatarConfig",
+        "memberUids",
+        "updatedAt"
+      ]
+    },
+    "HouseholdTask": {
+      "title": "HouseholdTask",
+      "description": "Shared household chore with rotation pool, authoritative dueAt timestamp, and bounded history.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 280
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Limpeza", "Cozinha", "Organização", "Manutenção", "Geral"]
+        },
+        "points": {
+          "type": "number"
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["alta", "media", "normal"]
+        },
+        "frequency": {
+          "type": "string",
+          "enum": ["once", "daily", "weekly", "biweekly", "monthly", "custom"]
+        },
+        "customIntervalDays": {
+          "type": "number"
+        },
+        "assignedToId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "participantIds": {
+          "type": "array"
+        },
+        "dueDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "dueTime": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$"
+        },
+        "dueAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "occurrenceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "occurrenceSeq": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "completed", "paused"]
+        },
+        "pausedUntil": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "pausedReason": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "reassignedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "reassignedBeforeDeadline": {
+          "type": "boolean"
+        },
+        "lastCompletedOccurrenceKey": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "history": {
+          "type": "array"
+        },
+        "createdByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "memberUids": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "category",
+        "points",
+        "priority",
+        "frequency",
+        "assignedToId",
+        "participantIds",
+        "dueDate",
+        "dueTime",
+        "dueAt",
+        "occurrenceId",
+        "occurrenceSeq",
+        "status",
+        "history",
+        "createdByUid",
+        "memberUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ShoppingItem": {
+      "title": "ShoppingItem",
+      "description": "Shared shopping item without any financial or price fields.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string",
+          "enum": ["un", "kg", "g", "L", "ml", "pct", "cx"]
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Mercado", "Limpeza", "Padaria", "Hortifruti", "Casa"]
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "bought"]
+        },
+        "buyerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "boughtAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "memberUids": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "quantity",
+        "unit",
+        "category",
+        "authorId",
+        "authorUid",
+        "status",
+        "memberUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PinNote": {
+      "title": "PinNote",
+      "description": "Quick reminder or note pinned to the House Pinboard.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 220
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "memberUids": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "authorId", "authorUid", "content", "pinned", "memberUids", "createdAt", "updatedAt"]
+    },
+    "PointTransaction": {
+      "title": "PointTransaction",
+      "description": "Immutable points and late penalty ledger record.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "residentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "taskId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "taskTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "occurrenceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "type": {
+          "type": "string",
+          "enum": ["completion", "penalty", "bonus"]
+        },
+        "basePoints": {
+          "type": "number"
+        },
+        "penaltyPercent": {
+          "type": "number"
+        },
+        "pointsDelta": {
+          "type": "number"
+        },
+        "penaltyDeducted": {
+          "type": "number"
+        },
+        "wasOverdue": {
+          "type": "boolean"
+        },
+        "delayMinutes": {
+          "type": "number"
+        },
+        "weekKey": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "actorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "memberUids": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "residentId",
+        "taskId",
+        "taskTitle",
+        "occurrenceId",
+        "type",
+        "basePoints",
+        "penaltyPercent",
+        "pointsDelta",
+        "penaltyDeducted",
+        "wasOverdue",
+        "delayMinutes",
+        "weekKey",
+        "actorUid",
+        "memberUids",
+        "createdAt"
+      ]
+    },
+    "PokeRecord": {
+      "title": "PokeRecord",
+      "description": "Immutable Poke & Shade reminder sent for an overdue chore.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "taskId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "taskTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "occurrenceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "fromResidentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "fromUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "toResidentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "intensity": {
+          "type": "string",
+          "enum": ["soft_serve", "a_little_shady", "full_ballroom"]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 280
+        },
+        "deliveredViaPush": {
+          "type": "boolean"
+        },
+        "memberUids": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "taskId",
+        "taskTitle",
+        "occurrenceId",
+        "fromResidentId",
+        "fromUid",
+        "toResidentId",
+        "intensity",
+        "message",
+        "deliveredViaPush",
+        "memberUids",
+        "createdAt"
+      ]
+    },
+    "SwapRequest": {
+      "title": "SwapRequest",
+      "description": "Mutual-confirmation chore swap proposal between household partners.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "taskId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "taskTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "fromResidentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "fromUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "toResidentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "declined", "cancelled"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "respondedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "memberUids": {
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "taskId",
+        "taskTitle",
+        "fromResidentId",
+        "fromUid",
+        "toResidentId",
+        "status",
+        "memberUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "InAppNotification": {
+      "title": "InAppNotification",
+      "description": "In-app notification alert delivered to a household partner.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "recipientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "senderId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "actorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "type": {
+          "type": "string",
+          "enum": ["poke", "swap", "penalty", "achievement", "system"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 280
+        },
+        "taskId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "intensity": {
+          "type": "string",
+          "enum": ["soft_serve", "a_little_shady", "full_ballroom"]
+        },
+        "readAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "memberUids": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "recipientId", "actorUid", "type", "title", "body", "memberUids", "createdAt", "updatedAt"]
+    },
+    "HouseActivityLog": {
+      "title": "HouseActivityLog",
+      "description": "Auditable chronological household activity entry.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["task", "shopping", "poke", "swap", "penalty", "house"]
+        },
+        "actorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "actorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "memberUids": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "type", "actorId", "actorUid", "summary", "memberUids", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublic" },
+      "description": "Non-PII user link to household and resident profile."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateProfile" },
+      "description": "Owner-only PII storage (email)."
+    },
+    "/invites/{inviteCode}": {
+      "schema": { "$ref": "#/entities/HouseholdInvite" },
+      "description": "Invite code mapping to householdId for partner onboarding."
+    },
+    "/households/{householdId}": {
+      "schema": { "$ref": "#/entities/Household" },
+      "description": "Household document containing settings, timezone, and penalty rules."
+    },
+    "/households/{householdId}/members/{memberUid}": {
+      "schema": { "$ref": "#/entities/HouseholdMember" },
+      "description": "Membership gate verifying Firebase Auth UID belongs to the household."
+    },
+    "/households/{householdId}/residents/{residentId}": {
+      "schema": { "$ref": "#/entities/ResidentProfile" },
+      "description": "Partner profiles, avatars, points, streaks, and shade settings."
+    },
+    "/households/{householdId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/HouseholdTask" },
+      "description": "Household chores, deadlines, and rotation state."
+    },
+    "/households/{householdId}/shoppingItems/{itemId}": {
+      "schema": { "$ref": "#/entities/ShoppingItem" },
+      "description": "Shared shopping list items."
+    },
+    "/households/{householdId}/pinNotes/{noteId}": {
+      "schema": { "$ref": "#/entities/PinNote" },
+      "description": "House Pinboard notes."
+    },
+    "/households/{householdId}/pointLedger/{txId}": {
+      "schema": { "$ref": "#/entities/PointTransaction" },
+      "description": "Immutable points and late-penalty ledger."
+    },
+    "/households/{householdId}/pokes/{pokeId}": {
+      "schema": { "$ref": "#/entities/PokeRecord" },
+      "description": "Immutable Poke & Shade history."
+    },
+    "/households/{householdId}/swapRequests/{swapId}": {
+      "schema": { "$ref": "#/entities/SwapRequest" },
+      "description": "Chore swap proposals and mutual confirmations."
+    },
+    "/households/{householdId}/notifications/{notifId}": {
+      "schema": { "$ref": "#/entities/InAppNotification" },
+      "description": "In-app notifications for household partners."
+    },
+    "/households/{householdId}/activityLog/{logId}": {
+      "schema": { "$ref": "#/entities/HouseActivityLog" },
+      "description": "Auditable household activity log."
+    }
+  }
+}
